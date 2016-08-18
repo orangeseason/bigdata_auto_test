@@ -33,7 +33,7 @@ object compCassaHive {
 
 
       //1. get hive data
-      var hiveDf_tmp = sqlContext.sql(TC_info.hive.sql).na.fill("").na.fill(0)
+      var hiveDf_tmp = sqlContext.sql(TC_info.hive.sql).na.fill("null").na.fill(0)
       TC_info.hive.drop.foreach(col => hiveDf_tmp = hiveDf_tmp.drop(col))
 
       val hiveDf = unifyFormat(hiveDf_tmp)
@@ -44,7 +44,7 @@ object compCassaHive {
       LogHolder.log.warn(s"1. Hive total records: ${hiveCount}")
 
       //2.get cassandra data
-      var cassaDf_tmp = sqlContext.read.format("org.apache.spark.sql.cassandra").options(Map("table"->TC_info.cassa.table,"keyspace"->TC_info.cassa.keyspace)).load().na.fill("").na.fill(0)
+      var cassaDf_tmp = sqlContext.read.format("org.apache.spark.sql.cassandra").options(Map("table"->TC_info.cassa.table,"keyspace"->TC_info.cassa.keyspace)).load().na.fill("null").na.fill(0)
       TC_info.cassa.condition.foreach(filter=> cassaDf_tmp = cassaDf_tmp.where(filter))
 
       val rename_map = TC_info.cassa.rename
@@ -80,7 +80,7 @@ object compCassaHive {
 
       //-------------------------compare record
       val comp_fields_ori = if((record_info.field)(0)=="*") hiveDf.columns else record_info.field
-      val comp_fields= comp_fields_ori.filterNot(record_info.ignor.toSet).filterNot(record_info.primaryKey.toSet)
+      val comp_fields= comp_fields_ori.filterNot(record_info.ignor.toSet).filterNot(record_info.primaryKey.toSet).filterNot(ele => ele.contains("dt"))
 
       val join_str = record_info.primaryKey.map(ele => s"${hive_reg_table}.${ele}=${cassa_reg_table}.${ele}").mkString(" AND ")
       val key_str = record_info.primaryKey.map(ele =>s"${hive_reg_table}.${ele}").mkString(",")
@@ -92,7 +92,7 @@ object compCassaHive {
 
       val diffRecNum = diffRec.count
       if(diffRecNum>0) {
-        LogHolder.log.warn(s"---- ERROR ${diffRec} records are not same, only ${hiveCount - diffRecNum} are same")
+        LogHolder.log.warn(s"---- ERROR ${diffRecNum} records are not same, only ${hiveCount - diffRecNum} are same")
         diffRec.show
       }
 
@@ -184,7 +184,8 @@ object compCassaHive {
 
   def unifyFormat(df:DataFrame):DataFrame={
 
-    val dismissUnusedDt = udf((dt: String) => if(dt<"1950-01-01 00:00:00")"" else dt)
+    //val dismissUnusedDt = udf((dt: String) => if(dt!= None && dt < "1950-01-01 00:00:00") "null" else dt)
+    //null pointer exception
 
     var df_tmp = df
     val df_types = df.dtypes
@@ -196,8 +197,10 @@ object compCassaHive {
         case "IntegerType" => df_tmp
         case "BooleanType" => df_tmp
         case "TimestampType" =>
-          val tmp = df_tmp.withColumn(field_name, date_format(df_tmp.col(field_name), "yyyy-MM-dd HH:mm:ss"))
-          tmp.withColumn(field_name, dismissUnusedDt(tmp.col(field_name)))
+          if(field_name!="saledt") df_tmp.drop(field_name) //work around
+          else
+            df_tmp.withColumn(field_name, date_format(df_tmp.col(field_name), "yyyy-MM-dd HH:mm:ss"))
+          //tmp.withColumn(field_name, dismissUnusedDt(tmp.col(field_name)))
         case _ => //decimal ,double....
           df_tmp.withColumn(field_name, df_tmp.col(field_name).cast(DecimalType(13, 2)))
       }
