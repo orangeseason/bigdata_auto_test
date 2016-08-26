@@ -78,6 +78,13 @@ object compCassaHive {
         excptDfKey.orderBy(record_info.careFiled).show(hiveCount.toInt)
       }
 
+      val cassaExcptDfKey = cassaDfKey.except(hiveDfKey)
+      val addkeynum = cassaExcptDfKey.count
+      if(addkeynum>0) {
+        LogHolder.log.warn (s"---- ERROR Total ${addkeynum} records are not in hive, but in cassandra. details are below")
+        cassaExcptDfKey.orderBy(record_info.careFiled).show(cassanCount.toInt)
+      }
+
       //-------------------------compare record
       val comp_fields_ori = if((record_info.field)(0)=="*") hiveDf.columns else record_info.field
       val comp_fields= comp_fields_ori.filterNot(record_info.ignor.toSet).filterNot(record_info.primaryKey.toSet).filterNot(ele => ele.contains("dt"))
